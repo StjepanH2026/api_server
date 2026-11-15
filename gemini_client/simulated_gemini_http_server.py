@@ -64,9 +64,8 @@ async def explain(request: ExplainRequest) -> dict[str, Any]:
 
     prompt = build_gemini_prompt(
         user_question=request.question,
-        input_value=request.input_value,
-        input_unit=request.input_unit,
-        target_unit=request.target_unit,
+        ip_address=request.ip_address,
+        tool_name=request.tool_name,
         mcp_result=mcp_result,
     )
 

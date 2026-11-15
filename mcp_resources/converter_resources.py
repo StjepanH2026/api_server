@@ -34,7 +34,7 @@ def network_logs() -> str:
 
     from pathlib import Path
 
-    pcap_log_path = Path(__file__).resolve().parent / "network_logs_sample.txt"
+    pcap_log_path = Path(__file__).resolve().parent / "Network_logs_sample.txt"
 
     if pcap_log_path.exists():
         return pcap_log_path.read_text(encoding="utf-8")

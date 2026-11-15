@@ -48,37 +48,46 @@ def lookup_ip_threat_intel(ip_address: str, maxAgeInDays: str = ""):
         JSON dictionary containing the abuse score, country, domain name, etc.
     """
 
-    import requests
-    import json
-    import ipaddress
+   # mcp_tools/converter_tools.py
+import os
+import requests
+import json
+import ipaddress
+from pathlib import Path
+from fastapi import APIRouter, HTTPException, status
 
+router = APIRouter(prefix="", tags=["soc-tools"])
+
+@router.post("/lookup_ip_threat")
+def lookup_ip_threat_intel(ip_address: str, maxAgeInDays: str = "30"):
+    """Query an external threat intel API (AbuseIPDB)."""
     try:
-        valid_ip = ipaddress.IPv4Address(ip_address)
+        ipaddress.IPv4Address(ip_address)
     except ipaddress.AddressValueError:
         raise HTTPException(
-            status_code = status.HTTP_400_BAD_REQUEST,
-            detail = f"'{ip_address}' is not a valid IPv4 address."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{ip_address}' is not a valid IPv4 address."
         )
 
-    # Defining the api-endpoint
+    api_key = os.getenv("ABUSEIPDB_API_KEY", "")
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ABUSEIPDB_API_KEY environment variable is not configured."
+        )
+
     url = 'https://api.abuseipdb.com/api/v2/check'
-
     querystring = {
-        'ipAddress': {ip_address},
-        'maxAgeInDays': {maxAgeInDays}
+        'ipAddress': ip_address,
+        'maxAgeInDays': maxAgeInDays
     }
-
     headers = {
         'Accept': 'application/json',
-        'Key': 'c6f0c6526cdd23eb2667ab330ca2172026a50bc4c8b1bdc880ebdf57fef69533518ce8dbace1d552'
+        'Key': api_key
     }
 
-    response = requests.request(method='GET', url=url, headers=headers, params=querystring)
-
-    # Formatted output get response
-    decodedResponse = json.loads(response.text)
-
-    return decodedResponse
+    response = requests.get(url, headers=headers, params=querystring, timeout=10)
+    return response.json()
 
 
 @router.post("/search_ip_in_logs")

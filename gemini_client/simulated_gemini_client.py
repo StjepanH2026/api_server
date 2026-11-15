@@ -63,41 +63,36 @@ async def call_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> tuple[Any,
 
 def build_gemini_prompt(
     user_question: str,
-    input_value: str,
-    input_unit: str,
-    target_unit: str,
+    ip_address: str,
+    tool_name: str,
     mcp_result: Any,
 ) -> str:
     """
-    Build the model-side context sent to Gemini.
-
-    This reuses the existing explain_conversion_prompt helper so the Gemini
-    client follows the same teaching prompt pattern as the MCP prompt module.
-    Gemini receives the verified MCP response after the tool call completes.
-    Gemini explains the result, but it is not asked to perform the calculation.
+    Build the model context sent to Gemini.
+    Selects the relevant SOC prompt based on the tool that was invoked.
     """
-
-    prompt_messages = Investigate_IP_prompt()
-    prompt_messages = search_local_logs_prompt()
+    # Select the prompt matching the tool call
+    if "log" in tool_name.lower():
+        prompt_messages = search_local_logs_prompt(ip_address)
+    else:
+        prompt_messages = Investigate_IP_prompt(ip_address)
 
     sections = [
-        """
-NOTE FOR THE USER:
-This is a simulation of an orchestration client. In a real deployment, this kind of client could be hosted as part of a backend service such as a FastAPI app, a serverless function, or an internal API layer that receives user requests, calls MCP tools, and then sends the verified tool result to Gemini for explanation.
-""".strip()
+        "NOTE: You are acting as an automated SOC Analyst assistant. "
+        "Use the verified MCP tool result below as your source of truth."
     ]
-    sections.extend(f"{message.role.upper()}:\n{message.content}" for message in prompt_messages)
+
+    # FastMCP Message content can be a TextContent object or plain string
+    for message in prompt_messages:
+        role_label = message.role.upper()
+        content_text = getattr(message.content, "text", str(message.content))
+        sections.append(f"{role_label}:\n{content_text}")
+
     sections.append(
-        f"""
-STUDENT QUESTION:
-{user_question}
-
-VERIFIED MCP TOOL RESULT:
-{mcp_result}
-
-Use the verified MCP tool result as the source of truth for the calculation.
-Include a short note that Gemini acted as the agent, but the calculation came from the MCP tool.
-""".strip()
+        f"USER QUESTION:\n{user_question}\n\n"
+        f"TARGET IP:\n{ip_address}\n\n"
+        f"VERIFIED MCP TOOL RESULT:\n{mcp_result}\n\n"
+        "Synthesise this information into a concise, professional SOC triage report."
     )
 
     return "\n\n".join(sections)
@@ -128,36 +123,26 @@ def generate_gemini_explanation(
 
 
 async def run_demo() -> None:
-    """
-    Run the Gemini + MCP integration demo.
-
-    Workflow:
-    1. Send a request to the MCP server at MCP_SERVER_URL.
-    2. Receive a structured MCP tool result back into this client.
-    3. Send that result to Gemini for explanation only.
-    """
-
     api_key = require_env(GEMINI_API_KEY, "GEMINI_API_KEY")
 
-    user_question = "Can you explain how to convert 10 km to miles?"
+    target_ip = "118.25.6.39"
+    tool_name = "lookup_ip_threat_intel"
+    user_question = f"What is the threat reputation of {target_ip} and should we block it?"
 
-    print("User question:")
-    print(user_question)
+    print(f"User Question: {user_question}")
+    print(f"Calling MCP Tool: {tool_name}")
 
-    print(f"\nCalling MCP tool: {KM_TO_MILES_TOOL}")
     mcp_result, elapsed_ms = await call_mcp_tool(
-        KM_TO_MILES_TOOL,
-        {"kilometers": 10},
+        tool_name,
+        {"ip_address": target_ip},
     )
 
-    print(f"MCP structured result ({elapsed_ms:.2f} ms):")
-    print(mcp_result)
+    print(f"MCP structured result ({elapsed_ms:.2f} ms):\n{mcp_result}")
 
     prompt = build_gemini_prompt(
         user_question=user_question,
-        input_value="10",
-        input_unit="km",
-        target_unit="miles",
+        ip_address=target_ip,
+        tool_name=tool_name,
         mcp_result=mcp_result,
     )
 
@@ -167,9 +152,7 @@ async def run_demo() -> None:
         model=GEMINI_MODEL,
     )
 
-    print("\nGemini streamed explanation:\n")
-    print(explanation)
-    print("\n")
+    print(f"\nGemini SOC Analysis:\n{explanation}\n")
 
 
 def main() -> None:

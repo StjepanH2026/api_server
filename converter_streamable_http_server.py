@@ -37,7 +37,7 @@ LOG_CONFIG = build_log_config(
 
 # FastAPI app for plain HTTP
 app = FastAPI(
-    title="Unit Converter MCP Server",
+    title="SOC threat hunt MCP server",
     description="FastAPI endpoints auto-exposed as MCP tools via FastMCP, with resources and prompts.",
     version="1.2.1",
 )
@@ -86,22 +86,25 @@ mcp.tool(
     description="Convert kilometers to miles with one MCP progress notification.",
 )
 
-# --- Register Resources --- dynamically via URI template
-##register_resources(mcp, RESOURCE_DEFINITIONS)
+# converter_streamable_http_server.py
 
-# Prompts
-@mcp.prompt(name="explain_conversion", description="Guide a learner through the math for a conversion.")
-def _prompt_explain_conversion(input_value: str, input_unit: str, target_unit: str):
-    return explain_conversion_prompt(
-        input_value=input_value,
-        input_unit=input_unit,
-        target_unit=target_unit,
-    )
+# --- Register static resources ---
+@mcp.resource("resource://AbuseIPDB", name="AbuseIP Database", mime_type="application/json")
+def _resource_AbuseIPDB():
+    return AbuseIPDB()
 
+@mcp.resource("resource://network_logs", name="Network Logs", mime_type="text/plain")
+def _resource_network_logs():
+    return network_logs()
 
-@mcp.prompt(name="api_usage", description="Produce a curl example for a conversion endpoint.")
-def _prompt_api_usage(operation: str):
-    return api_usage_prompt(operation)
+# --- Register prompts ---
+@mcp.prompt(name="Investigate_IP", description="Query AbuseIPDB for an IP address abuse score.")
+def _prompt_Investigate_IP(ip_address: str):
+    return Investigate_IP_prompt(ip_address)
+
+@mcp.prompt(name="Search_local_logs", description="Search local network logs for IP activity.")
+def _prompt_Search_local_logs(ip_address: str):
+    return search_local_logs_prompt(ip_address)
 
 # Build MCP sub-application and mount onto FastAPI
 mcp_http_app = mcp.http_app(path="/", transport="streamable-http")
