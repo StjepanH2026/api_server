@@ -94,7 +94,7 @@ def search_ip_in_logs_value(ip_address: str) -> str:
     """
     import ipaddress
     from pathlib import Path
-    network_logs_path = Path(__file__).resolve().parent.parent / "mcp_resources" / "network_logs_sample.txt"
+    network_logs_path = Path(__file__).resolve().parent.parent / "mcp_resources" / "Network_logs_sample.txt"
 
     try:
         valid_ip = ipaddress.IPv4Address(ip_address)
