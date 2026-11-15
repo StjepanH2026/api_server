@@ -119,20 +119,34 @@ def generate_gemini_explanation(
     return "".join(chunks).strip()
 
 
-async def run_full_triage(ip_address: str, user_question: str) -> dict[str, Any]:
-    """Execute MCP threat intelligence triage and generate Gemini synthesis."""
+async def run_prompt_workflow(
+    prompt_name: str,
+    ip_address: str,
+    user_question: str,
+) -> dict[str, Any]:
+    """
+    Execute the MCP tool corresponding to the chosen prompt workflow
+    and synthesise the result with Gemini.
+    """
     api_key = require_env(os.getenv("GEMINI_API_KEY", GEMINI_API_KEY), "GEMINI_API_KEY")
     model = os.getenv("GEMINI_MODEL", GEMINI_MODEL)
 
+    # Map prompt name directly to the corresponding tool
+    if prompt_name == "Search_local_logs":
+        tool_name = "search_ip_in_logs_value"
+    else:
+        prompt_name = "Investigate_IP"
+        tool_name = "lookup_ip_threat_intel"
+
     mcp_result, elapsed_ms = await call_mcp_tool(
-        "lookup_ip_threat_intel",
+        tool_name,
         {"ip_address": ip_address},
     )
 
     prompt = build_gemini_prompt(
         user_question=user_question,
         ip_address=ip_address,
-        tool_name="lookup_ip_threat_intel",
+        tool_name=tool_name,
         mcp_result=mcp_result,
     )
 
@@ -143,6 +157,8 @@ async def run_full_triage(ip_address: str, user_question: str) -> dict[str, Any]
     )
 
     return {
+        "prompt_workflow": prompt_name,
+        "tool_executed": tool_name,
         "ip_address": ip_address,
         "mcp_server_url": os.getenv("MCP_SERVER_URL", MCP_SERVER_URL),
         "mcp_elapsed_ms": round(elapsed_ms, 2),
@@ -151,13 +167,27 @@ async def run_full_triage(ip_address: str, user_question: str) -> dict[str, Any]
     }
 
 
+async def run_full_triage(
+    ip_address: str,
+    user_question: str,
+    tool_name: str = "lookup_ip_threat_intel",
+) -> dict[str, Any]:
+    """Backward compatibility wrapper for run_prompt_workflow."""
+    prompt_name = "Search_local_logs" if "log" in tool_name.lower() else "Investigate_IP"
+    return await run_prompt_workflow(
+        prompt_name=prompt_name,
+        ip_address=ip_address,
+        user_question=user_question,
+    )
+
+
 async def run_demo() -> None:
     """Run a local standalone demo of the IP triage flow."""
     target_ip = "118.25.6.39"
     question = f"What is the threat reputation of {target_ip} and should we block it?"
 
-    print(f"Investigating target IP: {target_ip}")
-    result = await run_full_triage(target_ip, question)
+    print(f"Testing workflow 'Investigate_IP' for target: {target_ip}")
+    result = await run_prompt_workflow("Investigate_IP", target_ip, question)
 
     print(f"\nMCP response received in {result['mcp_elapsed_ms']} ms:")
     print(result["mcp_result"])
