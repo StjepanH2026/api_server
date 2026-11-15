@@ -14,9 +14,7 @@ load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "https://mcp-server-7vi1.onrender.com")
-
-KM_TO_MILES_TOOL = "kilometers_to_miles"
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "https://mcp-server-7vi1.onrender.com/mcp/")
 
 
 def require_env(value: str | None, name: str) -> str:
@@ -32,7 +30,6 @@ async def handle_mcp_progress(
     message: str | None,
 ) -> None:
     """Print MCP progress notifications so they are visible during the demo."""
-
     if total is None:
         progress_text = f"{progress}"
     else:
@@ -43,15 +40,17 @@ async def handle_mcp_progress(
 
 async def call_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> tuple[Any, float]:
     """
-    Send an MCP request to the existing converter MCP server and return its response.
+    Send an MCP request to the deployed MCP server and return its response.
 
-    The calculation happens on the MCP server. This client only orchestrates the
+    The execution happens on the MCP server. This client only orchestrates the
     request/response flow and forwards the structured tool result to Gemini.
     """
+    server_url = os.getenv("MCP_SERVER_URL", MCP_SERVER_URL)
+    if server_url.endswith("/mcp"):
+        server_url += "/"
 
     async with Client(
-        MCP_SERVER_URL,
-        auth="demo-token",
+        server_url,
         progress_handler=handle_mcp_progress,
     ) as mcp_client:
         started_at = time.perf_counter()
@@ -71,18 +70,16 @@ def build_gemini_prompt(
     Build the model context sent to Gemini.
     Selects the relevant SOC prompt based on the tool that was invoked.
     """
-    # Select the prompt matching the tool call
     if "log" in tool_name.lower():
         prompt_messages = search_local_logs_prompt(ip_address)
     else:
         prompt_messages = Investigate_IP_prompt(ip_address)
 
     sections = [
-        "NOTE: You are acting as an automated SOC Analyst assistant. "
+        "ROLE:\nYou are a Senior Security Operations Centre (SOC) Analyst assistant.\n"
         "Use the verified MCP tool result below as your source of truth."
     ]
 
-    # FastMCP Message content can be a TextContent object or plain string
     for message in prompt_messages:
         role_label = message.role.upper()
         content_text = getattr(message.content, "text", str(message.content))
@@ -90,9 +87,10 @@ def build_gemini_prompt(
 
     sections.append(
         f"USER QUESTION:\n{user_question}\n\n"
-        f"TARGET IP:\n{ip_address}\n\n"
-        f"VERIFIED MCP TOOL RESULT:\n{mcp_result}\n\n"
-        "Synthesise this information into a concise, professional SOC triage report."
+        f"TARGET IP UNDER INVESTIGATION:\n{ip_address}\n\n"
+        f"VERIFIED EVIDENCE FROM MCP SERVER:\n{mcp_result}\n\n"
+        "FINAL INSTRUCTION:\n"
+        "Synthesise this information into a concise, professional SOC triage report with clear recommendations."
     )
 
     return "\n\n".join(sections)
@@ -105,7 +103,6 @@ def generate_gemini_explanation(
     model: str,
 ) -> str:
     """Stream Gemini output and return the combined explanation text."""
-
     from google import genai
 
     gemini_client = genai.Client(api_key=api_key)
@@ -122,37 +119,49 @@ def generate_gemini_explanation(
     return "".join(chunks).strip()
 
 
-async def run_demo() -> None:
-    api_key = require_env(GEMINI_API_KEY, "GEMINI_API_KEY")
-
-    target_ip = "118.25.6.39"
-    tool_name = "lookup_ip_threat_intel"
-    user_question = f"What is the threat reputation of {target_ip} and should we block it?"
-
-    print(f"User Question: {user_question}")
-    print(f"Calling MCP Tool: {tool_name}")
+async def run_full_triage(ip_address: str, user_question: str) -> dict[str, Any]:
+    """Execute MCP threat intelligence triage and generate Gemini synthesis."""
+    api_key = require_env(os.getenv("GEMINI_API_KEY", GEMINI_API_KEY), "GEMINI_API_KEY")
+    model = os.getenv("GEMINI_MODEL", GEMINI_MODEL)
 
     mcp_result, elapsed_ms = await call_mcp_tool(
-        tool_name,
-        {"ip_address": target_ip},
+        "lookup_ip_threat_intel",
+        {"ip_address": ip_address},
     )
-
-    print(f"MCP structured result ({elapsed_ms:.2f} ms):\n{mcp_result}")
 
     prompt = build_gemini_prompt(
         user_question=user_question,
-        ip_address=target_ip,
-        tool_name=tool_name,
+        ip_address=ip_address,
+        tool_name="lookup_ip_threat_intel",
         mcp_result=mcp_result,
     )
 
     explanation = generate_gemini_explanation(
         api_key=api_key,
         prompt=prompt,
-        model=GEMINI_MODEL,
+        model=model,
     )
 
-    print(f"\nGemini SOC Analysis:\n{explanation}\n")
+    return {
+        "ip_address": ip_address,
+        "mcp_server_url": os.getenv("MCP_SERVER_URL", MCP_SERVER_URL),
+        "mcp_elapsed_ms": round(elapsed_ms, 2),
+        "mcp_result": mcp_result,
+        "explanation": explanation,
+    }
+
+
+async def run_demo() -> None:
+    """Run a local standalone demo of the IP triage flow."""
+    target_ip = "118.25.6.39"
+    question = f"What is the threat reputation of {target_ip} and should we block it?"
+
+    print(f"Investigating target IP: {target_ip}")
+    result = await run_full_triage(target_ip, question)
+
+    print(f"\nMCP response received in {result['mcp_elapsed_ms']} ms:")
+    print(result["mcp_result"])
+    print(f"\nGemini Analysis:\n{result['explanation']}\n")
 
 
 def main() -> None:

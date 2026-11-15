@@ -10,16 +10,13 @@ from pydantic import BaseModel, Field
 from gemini_client.simulated_gemini_client import (
     GEMINI_MODEL,
     MCP_SERVER_URL,
-    build_gemini_prompt,
-    call_mcp_tool,
-    generate_gemini_explanation,
-    require_env,
+    run_full_triage,
 )
 
 load_dotenv()
 
 app = FastAPI(
-    title="Gemini MCP Client",
+    title="Gemini SOC MCP Client",
     description="HTTP wrapper for the Gemini client that calls the deployed MCP server.",
     version="1.0.0",
 )
@@ -36,7 +33,7 @@ def root() -> dict[str, str]:
         "service": "gemini-mcp-client",
         "status": "ok",
         "health": "/health",
-        "explain": "/explain",
+        "triage": "/ip_triage",
     }
 
 
@@ -44,13 +41,13 @@ def root() -> dict[str, str]:
 def health() -> dict[str, str]:
     return {
         "status": "ok",
-        "mcp_server_url": MCP_SERVER_URL,
-        "gemini_model": GEMINI_MODEL,
+        "mcp_server_url": os.getenv("MCP_SERVER_URL", MCP_SERVER_URL),
+        "gemini_model": os.getenv("GEMINI_MODEL", GEMINI_MODEL),
     }
 
 
 @app.post("/ip_triage")
-async def explain(request: TriageRequest):
+async def ip_triage(request: TriageRequest) -> dict[str, Any]:
     return await run_full_triage(
         ip_address=request.ip_address,
         user_question=request.question,

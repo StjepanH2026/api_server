@@ -1,7 +1,16 @@
 services:
   - type: web
-    name: mcp_server
+    name: mcp-server
     runtime: python
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn converter_streamable_http_server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+
+  - type: web
+    name: gemini-client
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn gemini_client.simulated_gemini_http_server:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
