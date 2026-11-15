@@ -3,3 +3,4 @@ uvicorn[standard]
 fastmcp
 google-genai
 python-dotenv
+requests
