@@ -134,8 +134,8 @@ Why these settings matter:
 Test the base service endpoints first:
 
 ```bash
-curl -s https://your-client-server-name.onrender.com/
-curl -s https://your-client-server-name.onrender.com/health
+curl -s https://mcp-server-gemini-o9ls.onrender.com/
+curl -s https://mcp-server-gemini-o9ls.onrender.com/health
 ```
 
 Then test the Gemini plus MCP flow:
@@ -195,7 +195,7 @@ curl -s https://your-client-server-name.onrender.com/explain \
 The Gemini client `/explain` endpoint does not call MCP prompts directly. To test the `api_usage` prompt itself, call the deployed MCP server:
 
 ```bash
-MCP_BASE="https://mcp-cicd-test.onrender.com"
+MCP_BASE="https://mcp-server-gemini-o9ls.onrender.com/"
 MCP="$MCP_BASE/mcp/"
 ACCEPT="Accept: application/json, text/event-stream"
 PROTO="MCP-Protocol-Version: 2025-06-18"
