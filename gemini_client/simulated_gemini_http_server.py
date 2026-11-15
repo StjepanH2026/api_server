@@ -25,13 +25,9 @@ app = FastAPI(
 )
 
 
-class ExplainRequest(BaseModel):
-    question: str = Field(..., description="Learner question for Gemini to answer.")
-    input_value: str = Field(..., description="Original numeric input as text.")
-    input_unit: str = Field(..., description="Source unit.")
-    target_unit: str = Field(..., description="Target unit.")
-    tool_name: str = Field(..., description="MCP tool to call.")
-    tool_arguments: dict[str, Any] = Field(..., description="Arguments for the MCP tool call.")
+class TriageRequest(BaseModel):
+    question: str = Field(..., description="Analyst triage query.")
+    ip_address: str = Field(..., description="Target IPv4 address to investigate.")
 
 
 @app.get("/")
@@ -53,34 +49,9 @@ def health() -> dict[str, str]:
     }
 
 
-@app.post("/explain")
-async def explain(request: ExplainRequest) -> dict[str, Any]:
-    api_key = require_env(os.getenv("GEMINI_API_KEY"), "GEMINI_API_KEY")
-
-    mcp_result, elapsed_ms = await call_mcp_tool(
-        request.tool_name,
-        request.tool_arguments,
-    )
-
-    prompt = build_gemini_prompt(
-        user_question=request.question,
+@app.post("/ip_triage")
+async def explain(request: TriageRequest):
+    return await run_full_triage(
         ip_address=request.ip_address,
-        tool_name=request.tool_name,
-        mcp_result=mcp_result,
+        user_question=request.question,
     )
-
-    explanation = generate_gemini_explanation(
-        api_key=api_key,
-        prompt=prompt,
-        model=os.getenv("GEMINI_MODEL", GEMINI_MODEL),
-    )
-
-    return {
-        "question": request.question,
-        "tool_name": request.tool_name,
-        "tool_arguments": request.tool_arguments,
-        "mcp_server_url": os.getenv("MCP_SERVER_URL", MCP_SERVER_URL),
-        "mcp_elapsed_ms": round(elapsed_ms, 2),
-        "mcp_result": mcp_result,
-        "explanation": explanation,
-    }
