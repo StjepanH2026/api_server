@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from typing import Any
@@ -68,16 +69,43 @@ def build_gemini_prompt(
 ) -> str:
     """
     Build the model context sent to Gemini.
-    Selects the relevant SOC prompt based on the tool that was invoked.
+    Instructs Gemini to return clean, structured JSON matching the SOC assessment schema.
     """
     if "log" in tool_name.lower():
         prompt_messages = search_local_logs_prompt(ip_address)
+        schema_example = """{
+  "verdict": "MALICIOUS / SUSPICIOUS / BENIGN / NO ACTIVITY",
+  "threat_level": "CRITICAL / HIGH / MEDIUM / LOW / NONE",
+  "activity_found": true,
+  "executive_summary": "1-2 sentence executive summary of internal activity.",
+  "evidence_analysis": "Detailed analysis of protocols, ports, and connection patterns observed in the logs.",
+  "recommended_actions": [
+    "Immediate firewall or network containment action",
+    "Endpoint investigation or credential check"
+  ]
+}"""
     else:
         prompt_messages = Investigate_IP_prompt(ip_address)
+        schema_example = """{
+  "verdict": "CRITICAL / MALICIOUS / SUSPICIOUS / BENIGN",
+  "threat_level": "CRITICAL / HIGH / MEDIUM / LOW / NONE",
+  "abuse_confidence_score": 100,
+  "country": "CN",
+  "isp": "Internet Service Provider Name",
+  "domain": "example.com",
+  "total_reports": 952,
+  "executive_summary": "1-2 sentence executive threat summary.",
+  "evidence_analysis": "Detailed analysis of AbuseIPDB indicators, report volume, and attack types.",
+  "recommended_actions": [
+    "Perimeter Defense: Block IP at boundary firewalls",
+    "SIEM Hunting: Search internal connection logs",
+    "Host Containment: Isolate endpoints if bidirectional traffic occurred"
+  ]
+}"""
 
     sections = [
-        "ROLE:\nYou are a Senior Security Operations Centre (SOC) Analyst assistant.\n"
-        "Use the verified MCP tool result below as your source of truth."
+        "ROLE:\nYou are a Senior Security Operations Centre (SOC) Analyst assistant.",
+        f"CRITICAL FORMATTING INSTRUCTION:\nYou must respond ONLY with a single valid JSON object matching this structure. Do not output markdown code blocks (no ```json or ```). Output raw JSON only:\n{schema_example}",
     ]
 
     for message in prompt_messages:
@@ -90,7 +118,7 @@ def build_gemini_prompt(
         f"TARGET IP UNDER INVESTIGATION:\n{ip_address}\n\n"
         f"VERIFIED EVIDENCE FROM MCP SERVER:\n{mcp_result}\n\n"
         "FINAL INSTRUCTION:\n"
-        "Synthesise this information into a concise, professional SOC triage report with clear recommendations."
+        "Populate the JSON fields accurately using the verified MCP evidence as your source of truth."
     )
 
     return "\n\n".join(sections)
@@ -102,21 +130,30 @@ def generate_gemini_explanation(
     prompt: str,
     model: str,
 ) -> str:
-    """Stream Gemini output and return the combined explanation text."""
+    """Request structured JSON from Gemini and return raw text."""
     from google import genai
 
     gemini_client = genai.Client(api_key=api_key)
-    stream = gemini_client.models.generate_content_stream(
-        model=model,
-        contents=prompt,
-    )
 
-    chunks: list[str] = []
-    for chunk in stream:
-        if chunk.text:
-            chunks.append(chunk.text)
-
-    return "".join(chunks).strip()
+    try:
+        # Request native JSON formatting from Gemini
+        response = gemini_client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config={"response_mime_type": "application/json"},
+        )
+        return response.text or "{}"
+    except Exception:
+        # Fallback to streaming if response_mime_type is unavailable
+        stream = gemini_client.models.generate_content_stream(
+            model=model,
+            contents=prompt,
+        )
+        chunks: list[str] = []
+        for chunk in stream:
+            if chunk.text:
+                chunks.append(chunk.text)
+        return "".join(chunks).strip()
 
 
 async def run_prompt_workflow(
@@ -126,12 +163,11 @@ async def run_prompt_workflow(
 ) -> dict[str, Any]:
     """
     Execute the MCP tool corresponding to the chosen prompt workflow
-    and synthesise the result with Gemini.
+    and synthesise the result with Gemini into structured JSON.
     """
     api_key = require_env(os.getenv("GEMINI_API_KEY", GEMINI_API_KEY), "GEMINI_API_KEY")
     model = os.getenv("GEMINI_MODEL", GEMINI_MODEL)
 
-    # Map prompt name directly to the corresponding tool
     if prompt_name == "Search_local_logs":
         tool_name = "search_ip_in_logs_value"
     else:
@@ -150,11 +186,29 @@ async def run_prompt_workflow(
         mcp_result=mcp_result,
     )
 
-    explanation = generate_gemini_explanation(
+    raw_explanation = generate_gemini_explanation(
         api_key=api_key,
         prompt=prompt,
         model=model,
     )
+
+    # Clean any markdown fences if present
+    cleaned = raw_explanation.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    try:
+        triage_assessment = json.loads(cleaned)
+    except json.JSONDecodeError:
+        triage_assessment = {
+            "verdict": "PARSING_NOTICE",
+            "raw_analysis": raw_explanation,
+        }
 
     return {
         "prompt_workflow": prompt_name,
@@ -162,8 +216,7 @@ async def run_prompt_workflow(
         "ip_address": ip_address,
         "mcp_server_url": os.getenv("MCP_SERVER_URL", MCP_SERVER_URL),
         "mcp_elapsed_ms": round(elapsed_ms, 2),
-        "mcp_result": mcp_result,
-        "explanation": explanation,
+        "triage_assessment": triage_assessment,
     }
 
 
@@ -190,8 +243,7 @@ async def run_demo() -> None:
     result = await run_prompt_workflow("Investigate_IP", target_ip, question)
 
     print(f"\nMCP response received in {result['mcp_elapsed_ms']} ms:")
-    print(result["mcp_result"])
-    print(f"\nGemini Analysis:\n{result['explanation']}\n")
+    print(json.dumps(result, indent=2))
 
 
 def main() -> None:
