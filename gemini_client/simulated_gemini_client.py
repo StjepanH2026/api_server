@@ -8,7 +8,7 @@ from typing import Any
 from dotenv import load_dotenv
 from fastmcp import Client
 
-from mcp_prompts.converter_prompts import Investigate_IP_prompt
+from mcp_prompts.converter_prompts import Investigate_IP_prompt, search_local_logs_prompt
 
 load_dotenv()
 
@@ -77,11 +77,8 @@ def build_gemini_prompt(
     Gemini explains the result, but it is not asked to perform the calculation.
     """
 
-    prompt_messages = explain_conversion_prompt(
-        input_value=input_value,
-        input_unit=input_unit,
-        target_unit=target_unit,
-    )
+    prompt_messages = Investigate_IP_prompt()
+    prompt_messages = search_local_logs_prompt()
 
     sections = [
         """
